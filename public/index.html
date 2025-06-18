@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <title>Zdalna Konsola</title>
+  <style>
+    body { font-family: sans-serif; margin: 2em; }
+    select, input, button { margin-top: 1em; padding: 0.5em; }
+    pre { background: #f4f4f4; padding: 1em; margin-top: 1em; }
+  </style>
+</head>
+<body>
+  <h1>Zdalna Konsola</h1>
+  
+  <label for="client">Wybierz komputer:</label>
+  <select id="client">
+    <option value="laptop">Laptop</option>
+    <option value="pc">PC</option>
+  </select><br>
+
+  <input type="text" id="command" placeholder="np. dir" size="40"/>
+  <button onclick="sendCommand()">Wyślij komendę</button>
+
+  <h3>Wynik:</h3>
+  <pre id="output">(czekam...)</pre>
+
+  <script>
+    async function sendCommand() {
+      const client = document.getElementById('client').value;
+      const command = document.getElementById('command').value;
+      const res = await fetch('/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command, client })
+      });
+      document.getElementById('output').textContent = 'Komenda wysłana...';
+    }
+
+    async function pollResult() {
+      const client = document.getElementById('client').value;
+      const res = await fetch(`/result?client=${client}`);
+      if (res.status === 200) {
+        const result = await res.text();
+        document.getElementById('output').textContent = result;
+      }
+    }
+
+    setInterval(pollResult, 5000); // co 5 sekund
+  </script>
+</body>
+</html>
