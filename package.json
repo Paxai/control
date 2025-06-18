@@ -1,13 +1,15 @@
 {
-  "name": "remote-control-server",
+  "name": "remote-control-panel",
   "version": "1.0.0",
-  "type": "module",
+  "description": "Zdalne sterowanie komputerem przez przeglądarkę",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "cors": "^2.8.5"
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
   }
 }
