@@ -24,7 +24,7 @@ if (!API_TOKEN || !PANEL_PASSWORD) {
 
 const commands = {};
 const results = {};
-const clients = new Set();  // <-- Tutaj trzymamy listę aktywnych klientów
+const clients = new Set();
 
 app.use(cors());
 app.use(express.json());
@@ -38,23 +38,21 @@ function authMiddleware(req, res, next) {
   next();
 }
 
+// Zwraca hasło panelu (frontend je pobiera do logowania)
 app.get('/password', (req, res) => {
   res.json({ password: PANEL_PASSWORD });
 });
 
-app.post('/command', authMiddleware, (req, res) => {
-  const { command, client } = req.body;
-  if (!command || !client) return res.status(400).send('Brakuje danych');
-  commands[client] = command;
-  clients.add(client);  // <-- Dodajemy klienta do listy
-  res.sendStatus(200);
-});
+// Dodaj lub aktualizuj klienta (przy odbiorze komend i wyników)
+function registerClient(name) {
+  if (name) clients.add(name);
+}
 
+// Pobierz komendę dla klienta (klient polling)
 app.get('/command', authMiddleware, (req, res) => {
   const client = req.query.client;
   if (!client) return res.status(400).send('Brakuje client');
-
-  clients.add(client);  // <-- Klient "odświeża" swoje połączenie
+  registerClient(client);
 
   const cmd = commands[client];
   if (cmd) {
@@ -64,15 +62,25 @@ app.get('/command', authMiddleware, (req, res) => {
   res.status(204).send();
 });
 
+// Ustaw komendę dla klienta (z panelu)
+app.post('/command', authMiddleware, (req, res) => {
+  const { command, client } = req.body;
+  if (!command || !client) return res.status(400).send('Brakuje danych');
+  commands[client] = command;
+  registerClient(client);
+  res.sendStatus(200);
+});
+
+// Prześlij wynik wykonania komendy (klient)
 app.post('/result', authMiddleware, (req, res) => {
   const { result, client } = req.body;
   if (!result || !client) return res.status(400).send('Brakuje danych');
-
-  clients.add(client);
+  registerClient(client);
   results[client] = result;
   res.sendStatus(200);
 });
 
+// Pobierz wynik wykonania komendy (panel)
 app.get('/result', authMiddleware, (req, res) => {
   const client = req.query.client;
   if (!client) return res.status(400).send('Brakuje client');
@@ -85,7 +93,7 @@ app.get('/result', authMiddleware, (req, res) => {
   res.status(204).send();
 });
 
-// NOWY ENDPOINT - lista klientów
+// Lista podłączonych klientów
 app.get('/clients', authMiddleware, (req, res) => {
   res.json(Array.from(clients));
 });
