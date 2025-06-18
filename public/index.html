@@ -17,7 +17,7 @@
 
 <div id="login">
   <label for="passwordInput">Podaj hasło:</label>
-  <input type="password" id="passwordInput" />
+  <input type="password" id="passwordInput" autocomplete="off" />
   <button onclick="login()">Zaloguj się</button>
 </div>
 
@@ -29,7 +29,7 @@
   </select>
 
   <label for="commandInput">Wpisz komendę:</label>
-  <input type="text" id="commandInput" placeholder="np. dir, whoami" />
+  <input type="text" id="commandInput" placeholder="np. dir, whoami" autocomplete="off" />
 
   <button onclick="sendCommand()">Wyślij komendę</button>
 
@@ -38,11 +38,14 @@
 </div>
 
 <script>
+  // TU wpisz URL backendu, np. localhost lub adres Render.com
+  const BASE_URL = ""; // pusta to lokalny serwer na tym samym hoście
+
   let PASSWORD = "";
   let API_TOKEN = "";
 
-  // Pobieramy hasło panelu
-  fetch('/password')
+  // Pobieramy hasło panelu (bez tokena)
+  fetch(`${BASE_URL}/password`)
     .then(res => res.json())
     .then(data => {
       PASSWORD = data.password || "";
@@ -51,15 +54,13 @@
       alert("Błąd pobierania hasła z serwera!");
     });
 
-  // Logowanie
   function login() {
     const input = document.getElementById("passwordInput").value;
     if (input === PASSWORD) {
       document.getElementById("login").style.display = "none";
       document.getElementById("panel").style.display = "block";
 
-      // Pobieramy token API (w realu możesz pobrać z backendu lub ustawić ręcznie)
-      API_TOKEN = prompt("Podaj swój API_TOKEN (np. secret-token-XYZ):");
+      API_TOKEN = prompt("Podaj swój API_TOKEN:");
       if (!API_TOKEN) {
         alert("Token API jest wymagany.");
         location.reload();
@@ -71,7 +72,6 @@
     }
   }
 
-  // Wysyłanie komendy do backendu
   function sendCommand() {
     const client = document.getElementById("clientSelect").value;
     const command = document.getElementById("commandInput").value.trim();
@@ -81,43 +81,42 @@
       return;
     }
 
-    fetch('/command', {
-      method: 'POST',
+    fetch(`${BASE_URL}/command`, {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${API_TOKEN}`
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${API_TOKEN}`
       },
       body: JSON.stringify({ command, client })
     })
-      .then(res => {
-        if (res.ok) {
-          document.getElementById("commandInput").value = "";
-          alert("Komenda wysłana, czekam na wynik...");
-        } else {
-          alert("Błąd wysyłania komendy: " + res.status);
-        }
-      });
+    .then(res => {
+      if (res.ok) {
+        document.getElementById("commandInput").value = "";
+        alert("Komenda wysłana, czekam na wynik...");
+      } else {
+        alert("Błąd wysyłania komendy: " + res.status);
+      }
+    })
+    .catch(err => alert("Błąd sieci: " + err.message));
   }
 
-  // Polling po wynik co 2 sekundy
   function pollResults() {
     const client = document.getElementById("clientSelect").value;
 
-    fetch(`/result?client=${encodeURIComponent(client)}`, {
-      headers: { 'Authorization': `Bearer ${API_TOKEN}` }
+    fetch(`${BASE_URL}/result?client=${encodeURIComponent(client)}`, {
+      headers: { "Authorization": `Bearer ${API_TOKEN}` }
     })
-      .then(res => {
-        if (res.status === 200) {
-          return res.text();
-        }
-        return null;
-      })
-      .then(text => {
-        if (text) {
-          document.getElementById("resultArea").value = text;
-        }
-      })
-      .catch(console.error);
+    .then(res => {
+      if (res.status === 200) return res.text();
+      else if (res.status === 204) return ""; // brak wyniku
+      else throw new Error("Błąd odpowiedzi: " + res.status);
+    })
+    .then(text => {
+      if (text) {
+        document.getElementById("resultArea").value = text;
+      }
+    })
+    .catch(console.error);
 
     setTimeout(pollResults, 2000);
   }
