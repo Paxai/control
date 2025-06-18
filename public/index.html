@@ -7,30 +7,60 @@
     body { font-family: sans-serif; margin: 2em; }
     select, input, button { margin-top: 1em; padding: 0.5em; }
     pre { background: #f4f4f4; padding: 1em; margin-top: 1em; }
+    #panel { display: none; }
   </style>
 </head>
 <body>
-  <h1>Zdalna Konsola</h1>
-  
-  <label for="client">Wybierz komputer:</label>
-  <select id="client">
-    <option value="laptop">Laptop</option>
-    <option value="pc">PC</option>
-  </select><br>
+  <div id="login">
+    <h2>🔐 Logowanie</h2>
+    <input type="password" id="password" placeholder="Hasło" />
+    <button onclick="login()">Zaloguj</button>
+    <p id="error" style="color:red;"></p>
+  </div>
 
-  <input type="text" id="command" placeholder="np. dir" size="40"/>
-  <button onclick="sendCommand()">Wyślij komendę</button>
+  <div id="panel">
+    <h1>Zdalna Konsola</h1>
+    <label for="client">Wybierz komputer:</label>
+    <select id="client">
+      <option value="laptop">Laptop</option>
+      <option value="pc">PC</option>
+    </select><br>
 
-  <h3>Wynik:</h3>
-  <pre id="output">(czekam...)</pre>
+    <input type="text" id="command" placeholder="np. dir" size="40"/>
+    <button onclick="sendCommand()">Wyślij komendę</button>
+
+    <h3>Wynik:</h3>
+    <pre id="output">(czekam...)</pre>
+  </div>
 
   <script>
+    const PASSWORD = "admin123";
+    const TOKEN = "secret-token-XYZ";
+
+    if (localStorage.getItem("token") === TOKEN) {
+      document.getElementById("login").style.display = "none";
+      document.getElementById("panel").style.display = "block";
+    }
+
+    function login() {
+      const pwd = document.getElementById("password").value;
+      if (pwd === PASSWORD) {
+        localStorage.setItem("token", TOKEN);
+        location.reload();
+      } else {
+        document.getElementById("error").innerText = "Błędne hasło!";
+      }
+    }
+
     async function sendCommand() {
       const client = document.getElementById('client').value;
       const command = document.getElementById('command').value;
       const res = await fetch('/command', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + localStorage.getItem("token")
+        },
         body: JSON.stringify({ command, client })
       });
       document.getElementById('output').textContent = 'Komenda wysłana...';
@@ -38,14 +68,18 @@
 
     async function pollResult() {
       const client = document.getElementById('client').value;
-      const res = await fetch(`/result?client=${client}`);
+      const res = await fetch(`/result?client=${client}`, {
+        headers: {
+          'Authorization': 'Bearer ' + localStorage.getItem("token")
+        }
+      });
       if (res.status === 200) {
         const result = await res.text();
         document.getElementById('output').textContent = result;
       }
     }
 
-    setInterval(pollResult, 5000); // co 5 sekund
+    setInterval(pollResult, 5000);
   </script>
 </body>
 </html>
