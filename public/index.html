@@ -38,6 +38,11 @@
     #fileList li.file::before {
       content: "📄 ";
     }
+    #fileList li.file:hover::after {
+      content: " 💾";
+      float: right;
+      color: #007bff;
+    }
     #fileList li.up::before {
       content: "⬆️ ";
     }
@@ -108,6 +113,11 @@
 
     <h2>Eksplorator plików</h2>
     <div id="fileExplorer" style="display:none;">
+      <div style="margin-bottom: 10px;">
+        <input type="file" id="fileUpload" style="display:none;" onchange="uploadFile()" />
+        <button onclick="document.getElementById('fileUpload').click()">📤 Prześlij plik</button>
+        <span id="uploadStatus" style="margin-left: 10px; font-style: italic;"></span>
+      </div>
       <div id="currentPath"></div>
       <div id="loadingIndicator" class="loading" style="display:none;">Ładowanie...</div>
       <ul id="fileList"></ul>
@@ -267,16 +277,41 @@
             const li = document.createElement('li');
             li.textContent = file.name;
             li.classList.add(file.isDirectory ? 'directory' : 'file');
-            li.onclick = () => {
-              if (file.isDirectory) {
+            
+            if (file.isDirectory) {
+              li.onclick = () => {
                 const newPath = currentPath.endsWith('\\') ? currentPath + file.name : currentPath + '\\' + file.name;
                 loadFiles(newPath);
                 fileContentElem.textContent = 'Wybierz plik, aby zobaczyć zawartość';
-              } else {
+              };
+            } else {
+              // Dla plików - prawy klik pobiera, lewy klik pokazuje zawartość
+              li.onclick = () => {
                 const filePath = currentPath.endsWith('\\') ? currentPath + file.name : currentPath + '\\' + file.name;
                 loadFileContent(filePath);
-              }
-            };
+              };
+              
+              li.oncontextmenu = (e) => {
+                e.preventDefault();
+                const filePath = currentPath.endsWith('\\') ? currentPath + file.name : currentPath + '\\' + file.name;
+                downloadFile(filePath);
+              };
+              
+              // Dodaj przycisk pobierania
+              const downloadBtn = document.createElement('span');
+              downloadBtn.textContent = ' 💾';
+              downloadBtn.style.float = 'right';
+              downloadBtn.style.color = '#007bff';
+              downloadBtn.style.cursor = 'pointer';
+              downloadBtn.title = 'Pobierz plik';
+              downloadBtn.onclick = (e) => {
+                e.stopPropagation();
+                const filePath = currentPath.endsWith('\\') ? currentPath + file.name : currentPath + '\\' + file.name;
+                downloadFile(filePath);
+              };
+              li.appendChild(downloadBtn);
+            }
+            
             fileListElem.appendChild(li);
           });
         }
@@ -312,6 +347,100 @@
         fileContentElem.textContent = data.content || '(plik pusty)';
       } catch (e) {
         fileContentElem.textContent = `Błąd ładowania pliku: ${e.message}`;
+      }
+    }
+
+    async function downloadFile(filePath) {
+      try {
+        const filename = filePath.split(/[\\/]/).pop();
+        const statusElem = document.getElementById('uploadStatus');
+        statusElem.textContent = `Pobieranie ${filename}...`;
+        
+        const res = await fetch(`/api/download?path=${encodeURIComponent(filePath)}&client=${encodeURIComponent(selectedClient)}`, {
+          headers: { 'Authorization': `Bearer ${apiToken}` }
+        });
+        
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
+        
+        // Pobierz plik jako blob
+        const blob = await res.blob();
+        
+        // Stwórz link do pobrania
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        
+        statusElem.textContent = `✅ ${filename} został pobrany`;
+        setTimeout(() => statusElem.textContent = '', 3000);
+        
+      } catch (e) {
+        document.getElementById('uploadStatus').textContent = `❌ Błąd pobierania: ${e.message}`;
+        setTimeout(() => document.getElementById('uploadStatus').textContent = '', 5000);
+      }
+    }
+
+    async function uploadFile() {
+      const fileInput = document.getElementById('fileUpload');
+      const file = fileInput.files[0];
+      
+      if (!file) return;
+      if (!selectedClient) return alert('Wybierz klienta!');
+      if (!currentPath) return alert('Otwórz najpierw eksplorator plików!');
+      
+      const statusElem = document.getElementById('uploadStatus');
+      statusElem.textContent = `Przesyłanie ${file.name}...`;
+      
+      try {
+        // Konwertuj plik na base64
+        const base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const base64String = reader.result.split(',')[1]; // usuń "data:type;base64," prefix
+            resolve(base64String);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiToken}` 
+          },
+          body: JSON.stringify({
+            client: selectedClient,
+            path: currentPath,
+            filename: file.name,
+            content: base64
+          })
+        });
+        
+        const result = await res.json();
+        
+        if (result.success) {
+          statusElem.textContent = `✅ ${file.name} został przesłany`;
+          // Odśwież listę plików
+          await loadFiles(currentPath);
+        } else {
+          statusElem.textContent = `❌ Błąd: ${result.message}`;
+        }
+        
+        // Wyczyść input
+        fileInput.value = '';
+        
+        setTimeout(() => statusElem.textContent = '', 5000);
+        
+      } catch (e) {
+        statusElem.textContent = `❌ Błąd przesyłania: ${e.message}`;
+        setTimeout(() => statusElem.textContent = '', 5000);
       }
     }
   </script>
