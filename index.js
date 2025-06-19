@@ -4,12 +4,10 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+// Setup __dirname i dotenv (tylko lokalnie)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-if (process.env.NODE_ENV !== 'production') {
-  dotenv.config();
-}
+if (process.env.NODE_ENV !== 'production') dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -22,14 +20,15 @@ if (!API_TOKEN || !PANEL_PASSWORD) {
   process.exit(1);
 }
 
+const clients = new Set();
 const commands = {};
 const results = {};
-const clients = new Set();
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Middleware autoryzujący tylko dla klienta (C#)
 function authMiddleware(req, res, next) {
   const token = req.headers['authorization'];
   if (token !== `Bearer ${API_TOKEN}`) {
@@ -38,53 +37,27 @@ function authMiddleware(req, res, next) {
   next();
 }
 
-// Zwraca hasło panelu (frontend je pobiera do logowania)
-app.get('/password', (req, res) => {
-  res.json({ password: PANEL_PASSWORD });
-});
+// ------------------------ PANEL ----------------------------
 
-// Dodaj lub aktualizuj klienta (przy odbiorze komend i wyników)
-function registerClient(name) {
-  if (name) clients.add(name);
-}
-
-// Pobierz komendę dla klienta (klient polling)
-app.get('/command', authMiddleware, (req, res) => {
-  const client = req.query.client;
-  if (!client) return res.status(400).send('Brakuje client');
-  registerClient(client);
-
-  const cmd = commands[client];
-  if (cmd) {
-    delete commands[client];
-    return res.send(cmd);
+// Logowanie panelu (sprawdzanie hasła)
+app.post('/login', (req, res) => {
+  const { password } = req.body;
+  if (password === PANEL_PASSWORD) {
+    res.json({ success: true });
+  } else {
+    res.status(403).json({ success: false });
   }
-  res.status(204).send();
 });
 
-// Ustaw komendę dla klienta (z panelu)
-app.post('/command', authMiddleware, (req, res) => {
-  const { command, client } = req.body;
-  if (!command || !client) return res.status(400).send('Brakuje danych');
-  commands[client] = command;
-  registerClient(client);
-  res.sendStatus(200);
+// Pobierz listę klientów - bez tokena
+app.get('/clients', (req, res) => {
+  res.json(Array.from(clients));
 });
 
-// Prześlij wynik wykonania komendy (klient)
-app.post('/result', authMiddleware, (req, res) => {
-  const { result, client } = req.body;
-  if (!result || !client) return res.status(400).send('Brakuje danych');
-  registerClient(client);
-  results[client] = result;
-  res.sendStatus(200);
-});
-
-// Pobierz wynik wykonania komendy (panel)
-app.get('/result', authMiddleware, (req, res) => {
+// Pobierz wynik klienta
+app.get('/result', (req, res) => {
   const client = req.query.client;
-  if (!client) return res.status(400).send('Brakuje client');
-
+  if (!client) return res.status(400).send('Brakuje klienta');
   const r = results[client];
   if (r) {
     delete results[client];
@@ -93,9 +66,43 @@ app.get('/result', authMiddleware, (req, res) => {
   res.status(204).send();
 });
 
-// Lista podłączonych klientów
-app.get('/clients', authMiddleware, (req, res) => {
-  res.json(Array.from(clients));
+// --------------------- KLIENT C# --------------------------
+
+// Klient zgłasza się i dodaje do listy
+app.post('/register', authMiddleware, (req, res) => {
+  const { client } = req.body;
+  if (!client) return res.status(400).send('Brakuje klienta');
+  clients.add(client);
+  res.sendStatus(200);
+});
+
+// Klient pobiera komendę
+app.get('/command', authMiddleware, (req, res) => {
+  const client = req.query.client;
+  if (!client) return res.status(400).send('Brakuje klienta');
+  const cmd = commands[client];
+  if (cmd) {
+    delete commands[client];
+    return res.send(cmd);
+  }
+  res.status(204).send();
+});
+
+// Klient wysyła wynik
+app.post('/result', authMiddleware, (req, res) => {
+  const { client, result } = req.body;
+  if (!client || !result) return res.status(400).send('Brakuje danych');
+  results[client] = result;
+  res.sendStatus(200);
+});
+
+// Panel wysyła komendę do klienta
+app.post('/command', (req, res) => {
+  const { client, command } = req.body;
+  if (!client || !command) return res.status(400).send('Brakuje danych');
+  if (!clients.has(client)) return res.status(404).send('Klient nieznany');
+  commands[client] = command;
+  res.sendStatus(200);
 });
 
 app.listen(port, () => {
