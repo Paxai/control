@@ -3,6 +3,47 @@
 <head>
   <meta charset="UTF-8" />
   <title>Panel sterowania</title>
+  <style>
+    #fileExplorer {
+      margin-top: 20px;
+      border: 1px solid #ccc;
+      padding: 10px;
+      max-width: 600px;
+    }
+    #fileList {
+      list-style: none;
+      padding-left: 0;
+      max-height: 300px;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+      margin-bottom: 10px;
+    }
+    #fileList li {
+      cursor: pointer;
+      padding: 4px;
+    }
+    #fileList li:hover {
+      background-color: #f0f0f0;
+    }
+    #fileList li.directory::before {
+      content: "📁 ";
+    }
+    #fileList li.file::before {
+      content: "📄 ";
+    }
+    #fileContent {
+      white-space: pre-wrap;
+      background: #fafafa;
+      border: 1px solid #ddd;
+      padding: 10px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    #currentPath {
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+  </style>
 </head>
 <body>
   <h1>Panel sterowania</h1>
@@ -22,13 +63,22 @@
 
     <h2>Otrzymany wynik</h2>
     <pre id="resultOutput">Brak wyniku</pre>
-
     <button onclick="getResult()">Odśwież wynik</button>
+
+    <hr />
+
+    <h2>Eksplorator plików</h2>
+    <div id="fileExplorer" style="display:none;">
+      <div id="currentPath"></div>
+      <ul id="fileList"></ul>
+      <pre id="fileContent">Wybierz plik, aby zobaczyć zawartość</pre>
+    </div>
   </div>
 
   <script>
     let loggedIn = false;
     let selectedClient = null;
+    let apiToken = null; // musimy przechować token do auth w fetchach eksploratora
 
     async function login() {
       const password = document.getElementById('password').value;
@@ -39,9 +89,15 @@
       });
       if (res.ok) {
         loggedIn = true;
+        // Po zalogowaniu załaduj token z backendu (zakładam, że token jest znany w front-endzie, 
+        // np. wpisujesz go ręcznie, albo można zrobić endpoint, który zwraca token po zalogowaniu)
+        // Jeśli chcesz, możesz ręcznie przypisać token tutaj:
+        apiToken = prompt("Wpisz swój API_TOKEN (token autoryzacyjny):");
         document.getElementById('loginDiv').style.display = 'none';
         document.getElementById('panelDiv').style.display = 'block';
+        document.getElementById('fileExplorer').style.display = 'block';
         loadClients();
+        loadFiles('C:\\'); // start z katalogu C:\ (dla Windowsa)
       } else {
         alert('Błędne hasło!');
       }
@@ -95,6 +151,83 @@
         document.getElementById('resultOutput').textContent = text;
       } else {
         document.getElementById('resultOutput').textContent = 'Brak wyniku';
+      }
+    }
+
+    // --- Eksplorator plików ---
+
+    const fileListElem = document.getElementById('fileList');
+    const fileContentElem = document.getElementById('fileContent');
+    const currentPathElem = document.getElementById('currentPath');
+
+    let currentPath = '';
+
+    async function loadFiles(path) {
+      if (!apiToken) {
+        alert("Brak tokena API. Nie można pobrać plików.");
+        return;
+      }
+      try {
+        const res = await fetch(`/api/files?path=${encodeURIComponent(path)}`, {
+          headers: { 'Authorization': `Bearer ${apiToken}` }
+        });
+        if (!res.ok) {
+          alert(`Błąd pobierania plików: ${res.statusText}`);
+          return;
+        }
+        const data = await res.json();
+        currentPath = data.path;
+        currentPathElem.textContent = `Ścieżka: ${currentPath}`;
+        fileListElem.innerHTML = '';
+
+        // Jeśli nie root, dodaj możliwość powrotu do katalogu wyżej
+        if (path !== '' && path !== '/' && !path.match(/^[a-zA-Z]:\\?$/)) {
+          const upLi = document.createElement('li');
+          upLi.textContent = '.. (folder nadrzędny)';
+          upLi.classList.add('directory');
+          upLi.onclick = () => {
+            const upPath = currentPath.split(/[\\/]/).slice(0, -1).join('\\');
+            loadFiles(upPath || 'C:\\');
+          };
+          fileListElem.appendChild(upLi);
+        }
+
+        data.files.forEach(file => {
+          const li = document.createElement('li');
+          li.textContent = file.name;
+          li.classList.add(file.isDirectory ? 'directory' : 'file');
+          li.onclick = () => {
+            if (file.isDirectory) {
+              loadFiles(pathEndsWithSlash(path) ? path + file.name : path + '\\' + file.name);
+              fileContentElem.textContent = 'Wybierz plik, aby zobaczyć zawartość';
+            } else {
+              loadFileContent(pathEndsWithSlash(path) ? path + file.name : path + '\\' + file.name);
+            }
+          };
+          fileListElem.appendChild(li);
+        });
+      } catch (e) {
+        alert('Błąd: ' + e.message);
+      }
+    }
+
+    function pathEndsWithSlash(p) {
+      return p.endsWith('\\') || p.endsWith('/');
+    }
+
+    async function loadFileContent(filePath) {
+      try {
+        const res = await fetch(`/api/file?path=${encodeURIComponent(filePath)}`, {
+          headers: { 'Authorization': `Bearer ${apiToken}` }
+        });
+        if (!res.ok) {
+          fileContentElem.textContent = `Nie można wczytać pliku (${res.status})`;
+          return;
+        }
+        const data = await res.json();
+        fileContentElem.textContent = data.content;
+      } catch (e) {
+        fileContentElem.textContent = 'Błąd: ' + e.message;
       }
     }
   </script>
