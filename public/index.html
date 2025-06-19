@@ -4,11 +4,16 @@
   <meta charset="UTF-8" />
   <title>Panel sterowania</title>
   <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
     #fileExplorer {
       margin-top: 20px;
       border: 1px solid #ccc;
       padding: 10px;
-      max-width: 600px;
+      max-width: 800px;
+      background-color: #f9f9f9;
     }
     #fileList {
       list-style: none;
@@ -17,10 +22,12 @@
       overflow-y: auto;
       border: 1px solid #ddd;
       margin-bottom: 10px;
+      background-color: white;
     }
     #fileList li {
       cursor: pointer;
-      padding: 4px;
+      padding: 8px;
+      border-bottom: 1px solid #eee;
     }
     #fileList li:hover {
       background-color: #f0f0f0;
@@ -31,17 +38,47 @@
     #fileList li.file::before {
       content: "📄 ";
     }
+    #fileList li.up::before {
+      content: "⬆️ ";
+    }
     #fileContent {
       white-space: pre-wrap;
       background: #fafafa;
       border: 1px solid #ddd;
       padding: 10px;
-      max-height: 300px;
+      max-height: 400px;
       overflow-y: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
     }
     #currentPath {
       font-weight: bold;
-      margin-bottom: 5px;
+      margin-bottom: 10px;
+      padding: 5px;
+      background-color: #e9e9e9;
+      border-radius: 3px;
+    }
+    .loading {
+      color: #666;
+      font-style: italic;
+    }
+    button {
+      padding: 8px 12px;
+      margin: 5px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    input, select {
+      padding: 5px;
+      margin: 5px;
+      border: 1px solid #ccc;
+      border-radius: 3px;
     }
   </style>
 </head>
@@ -56,11 +93,11 @@
   <div id="panelDiv" style="display:none;">
     <h2>Klienci</h2>
     <select id="clientsSelect" onchange="selectClient()"></select>
-
+    <button onclick="loadClients()">Odśwież listę klientów</button>
     <button onclick="openExplorer()">Otwórz eksplorator plików</button>
 
     <h2>Wysyłanie komendy</h2>
-    <input id="commandInput" type="text" placeholder="Komenda do wysłania" />
+    <input id="commandInput" type="text" placeholder="Komenda do wysłania" style="width: 300px;" />
     <button onclick="sendCommand()">Wyślij komendę</button>
 
     <h2>Otrzymany wynik</h2>
@@ -72,7 +109,9 @@
     <h2>Eksplorator plików</h2>
     <div id="fileExplorer" style="display:none;">
       <div id="currentPath"></div>
+      <div id="loadingIndicator" class="loading" style="display:none;">Ładowanie...</div>
       <ul id="fileList"></ul>
+      <h3>Zawartość pliku:</h3>
       <pre id="fileContent">Wybierz plik, aby zobaczyć zawartość</pre>
     </div>
   </div>
@@ -92,9 +131,13 @@
       if (res.ok) {
         loggedIn = true;
         apiToken = prompt("Wpisz swój API_TOKEN (token autoryzacyjny):");
+        if (!apiToken) {
+          alert("Token jest wymagany!");
+          return;
+        }
         document.getElementById('loginDiv').style.display = 'none';
         document.getElementById('panelDiv').style.display = 'block';
-        loadClients();
+        await loadClients();
       } else {
         alert('Błędne hasło!');
       }
@@ -102,18 +145,23 @@
 
     async function loadClients() {
       if (!loggedIn) return alert('Zaloguj się najpierw!');
-      const res = await fetch('/clients');
-      const clients = await res.json();
-      const select = document.getElementById('clientsSelect');
-      select.innerHTML = '';
-      clients.forEach(c => {
-        const option = document.createElement('option');
-        option.value = c;
-        option.textContent = c;
-        select.appendChild(option);
-      });
-      if (clients.length > 0) {
-        selectedClient = clients[0];
+      try {
+        const res = await fetch('/clients');
+        const clients = await res.json();
+        const select = document.getElementById('clientsSelect');
+        select.innerHTML = '<option value="">-- Wybierz klienta --</option>';
+        clients.forEach(c => {
+          const option = document.createElement('option');
+          option.value = c;
+          option.textContent = c;
+          select.appendChild(option);
+        });
+        if (clients.length > 0 && !selectedClient) {
+          selectedClient = clients[0];
+          select.value = selectedClient;
+        }
+      } catch (e) {
+        alert('Błąd ładowania klientów: ' + e.message);
       }
     }
 
@@ -121,44 +169,56 @@
       const select = document.getElementById('clientsSelect');
       selectedClient = select.value;
       document.getElementById('resultOutput').textContent = 'Brak wyniku';
+      // Ukryj eksplorator przy zmianie klienta
+      document.getElementById('fileExplorer').style.display = 'none';
     }
 
     async function sendCommand() {
       if (!selectedClient) return alert('Wybierz klienta!');
       const command = document.getElementById('commandInput').value;
       if (!command) return alert('Wpisz komendę!');
-      const res = await fetch('/command', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ client: selectedClient, command })
-      });
-      if (res.ok) {
-        alert('Komenda wysłana!');
-        document.getElementById('commandInput').value = '';
-      } else {
-        alert('Błąd wysyłania komendy');
+      
+      try {
+        const res = await fetch('/command', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ client: selectedClient, command })
+        });
+        if (res.ok) {
+          alert('Komenda wysłana!');
+          document.getElementById('commandInput').value = '';
+        } else {
+          alert('Błąd wysyłania komendy: ' + res.statusText);
+        }
+      } catch (e) {
+        alert('Błąd: ' + e.message);
       }
     }
 
     async function getResult() {
       if (!selectedClient) return alert('Wybierz klienta!');
-      const res = await fetch(`/result?client=${encodeURIComponent(selectedClient)}`);
-      if (res.status === 200) {
-        const text = await res.text();
-        document.getElementById('resultOutput').textContent = text;
-      } else {
-        document.getElementById('resultOutput').textContent = 'Brak wyniku';
+      try {
+        const res = await fetch(`/result?client=${encodeURIComponent(selectedClient)}`);
+        if (res.status === 200) {
+          const text = await res.text();
+          document.getElementById('resultOutput').textContent = text;
+        } else {
+          document.getElementById('resultOutput').textContent = 'Brak wyniku';
+        }
+      } catch (e) {
+        alert('Błąd: ' + e.message);
       }
     }
 
-    // Eksplorator plików - pokazuje i ładuje pliki tylko po kliknięciu
+    // Eksplorator plików
     const fileListElem = document.getElementById('fileList');
     const fileContentElem = document.getElementById('fileContent');
     const currentPathElem = document.getElementById('currentPath');
+    const loadingIndicator = document.getElementById('loadingIndicator');
     let currentPath = '';
 
-    function pathEndsWithSlash(p) {
-      return p.endsWith('\\') || p.endsWith('/');
+    function showLoading(show) {
+      loadingIndicator.style.display = show ? 'block' : 'none';
     }
 
     async function openExplorer() {
@@ -169,63 +229,89 @@
     }
 
     async function loadFiles(path) {
+      showLoading(true);
       try {
-        const res = await fetch(`/api/files?path=${encodeURIComponent(path)}`, {
+        const res = await fetch(`/api/files?path=${encodeURIComponent(path)}&client=${encodeURIComponent(selectedClient)}`, {
           headers: { 'Authorization': `Bearer ${apiToken}` }
         });
+        
         if (!res.ok) {
-          alert(`Błąd pobierania plików: ${res.statusText}`);
-          return;
+          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         }
+        
         const data = await res.json();
-        currentPath = data.path;
+        currentPath = data.currentPath || data.path;
         currentPathElem.textContent = `Ścieżka: ${currentPath}`;
         fileListElem.innerHTML = '';
 
         // Przycisk powrotu do katalogu wyżej
-        if (path !== '' && path !== '/' && !path.match(/^[a-zA-Z]:\\?$/)) {
+        if (path !== 'C:\\' && path !== '') {
           const upLi = document.createElement('li');
           upLi.textContent = '.. (folder nadrzędny)';
-          upLi.classList.add('directory');
+          upLi.classList.add('up');
           upLi.onclick = () => {
-            const upPath = currentPath.split(/[\\/]/).slice(0, -1).join('\\');
-            loadFiles(upPath || 'C:\\');
+            const pathParts = currentPath.split(/[\\/]/).filter(p => p.length > 0);
+            if (pathParts.length > 1) {
+              const upPath = pathParts.slice(0, -1).join('\\') + '\\';
+              loadFiles(upPath);
+            } else if (pathParts.length === 1) {
+              loadFiles(pathParts[0] + '\\');
+            }
           };
           fileListElem.appendChild(upLi);
         }
 
-        data.files.forEach(file => {
-          const li = document.createElement('li');
-          li.textContent = file.name;
-          li.classList.add(file.isDirectory ? 'directory' : 'file');
-          li.onclick = () => {
-            if (file.isDirectory) {
-              loadFiles(pathEndsWithSlash(path) ? path + file.name : path + '\\' + file.name);
-              fileContentElem.textContent = 'Wybierz plik, aby zobaczyć zawartość';
-            } else {
-              loadFileContent(pathEndsWithSlash(path) ? path + file.name : path + '\\' + file.name);
-            }
-          };
-          fileListElem.appendChild(li);
-        });
+        // Lista plików i folderów
+        if (data.files && Array.isArray(data.files)) {
+          data.files.forEach(file => {
+            const li = document.createElement('li');
+            li.textContent = file.name;
+            li.classList.add(file.isDirectory ? 'directory' : 'file');
+            li.onclick = () => {
+              if (file.isDirectory) {
+                const newPath = currentPath.endsWith('\\') ? currentPath + file.name : currentPath + '\\' + file.name;
+                loadFiles(newPath);
+                fileContentElem.textContent = 'Wybierz plik, aby zobaczyć zawartość';
+              } else {
+                const filePath = currentPath.endsWith('\\') ? currentPath + file.name : currentPath + '\\' + file.name;
+                loadFileContent(filePath);
+              }
+            };
+            fileListElem.appendChild(li);
+          });
+        }
+
+        if (!data.files || data.files.length === 0) {
+          const emptyLi = document.createElement('li');
+          emptyLi.textContent = '(pusty katalog)';
+          emptyLi.style.fontStyle = 'italic';
+          emptyLi.style.color = '#666';
+          fileListElem.appendChild(emptyLi);
+        }
+
       } catch (e) {
-        alert('Błąd: ' + e.message);
+        alert('Błąd ładowania plików: ' + e.message);
+        currentPathElem.textContent = 'Błąd ładowania';
+      } finally {
+        showLoading(false);
       }
     }
 
     async function loadFileContent(filePath) {
+      fileContentElem.textContent = 'Ładowanie zawartości pliku...';
       try {
-        const res = await fetch(`/api/file?path=${encodeURIComponent(filePath)}`, {
+        const res = await fetch(`/api/file?path=${encodeURIComponent(filePath)}&client=${encodeURIComponent(selectedClient)}`, {
           headers: { 'Authorization': `Bearer ${apiToken}` }
         });
+        
         if (!res.ok) {
-          fileContentElem.textContent = `Nie można wczytać pliku (${res.status})`;
-          return;
+          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         }
+        
         const data = await res.json();
-        fileContentElem.textContent = data.content;
+        fileContentElem.textContent = data.content || '(plik pusty)';
       } catch (e) {
-        fileContentElem.textContent = 'Błąd: ' + e.message;
+        fileContentElem.textContent = `Błąd ładowania pliku: ${e.message}`;
       }
     }
   </script>
