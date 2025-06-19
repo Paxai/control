@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs/promises';
 
 // Setup __dirname i dotenv (tylko lokalnie)
 const __filename = fileURLToPath(import.meta.url);
@@ -103,6 +104,46 @@ app.post('/command', (req, res) => {
   if (!clients.has(client)) return res.status(404).send('Klient nieznany');
   commands[client] = command;
   res.sendStatus(200);
+});
+
+// ------------------- Eksplorator plików --------------------
+
+// Lista plików i folderów w danym katalogu
+app.get('/api/files', authMiddleware, async (req, res) => {
+  const dirPath = req.query.path;
+  if (!dirPath) return res.status(400).send('Brakuje ścieżki');
+
+  // Prosta walidacja, możesz rozbudować
+  if (dirPath.includes('..')) return res.status(400).send('Nieprawidłowa ścieżka');
+
+  try {
+    const files = await fs.readdir(dirPath, { withFileTypes: true });
+    const list = files.map(file => ({
+      name: file.name,
+      isDirectory: file.isDirectory()
+    }));
+    res.json({ path: dirPath, files: list });
+  } catch (e) {
+    console.error('Błąd czytania katalogu:', e);
+    res.status(500).send('Błąd czytania katalogu');
+  }
+});
+
+// Pobierz zawartość pliku jako tekst
+app.get('/api/file', authMiddleware, async (req, res) => {
+  const filePath = req.query.path;
+  if (!filePath) return res.status(400).send('Brakuje ścieżki');
+
+  // Prosta walidacja, możesz rozbudować
+  if (filePath.includes('..')) return res.status(400).send('Nieprawidłowa ścieżka');
+
+  try {
+    const content = await fs.readFile(filePath, 'utf-8');
+    res.json({ path: filePath, content });
+  } catch (e) {
+    console.error('Błąd czytania pliku:', e);
+    res.status(500).send('Błąd czytania pliku');
+  }
 });
 
 app.listen(port, () => {
