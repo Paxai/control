@@ -1,164 +1,102 @@
 <!DOCTYPE html>
 <html lang="pl">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Panel Sterowania Zdalnego</title>
-<style>
-  body { font-family: Arial, sans-serif; max-width: 600px; margin: 2em auto; }
-  #loginPanel, #controlPanel { margin-top: 1em; }
-  #controlPanel { display: none; }
-  textarea { width: 100%; height: 150px; }
-  select, input[type="text"] { width: 100%; padding: 0.5em; margin: 0.5em 0; }
-  button { padding: 0.5em 1em; cursor: pointer; }
-  .error { color: red; }
-</style>
+  <meta charset="UTF-8" />
+  <title>Panel sterowania</title>
 </head>
 <body>
+  <h1>Panel sterowania</h1>
 
-<h1>Panel Sterowania Zdalnego</h1>
+  <div id="loginDiv">
+    <input id="password" type="password" placeholder="Hasło panelu" />
+    <button onclick="login()">Zaloguj</button>
+  </div>
 
-<div id="loginPanel">
-  <label>Hasło panelu:
-    <input type="password" id="passwordInput" />
-  </label>
-  <button id="loginBtn">Zaloguj się</button>
-  <p id="loginError" class="error"></p>
-</div>
+  <div id="panelDiv" style="display:none;">
+    <h2>Klienci</h2>
+    <select id="clientsSelect" onchange="selectClient()"></select>
 
-<div id="controlPanel">
-  <label>Wybierz klienta:
-    <select id="clientSelect"></select>
-  </label>
+    <h2>Wysyłanie komendy</h2>
+    <input id="commandInput" type="text" placeholder="Komenda do wysłania" />
+    <button onclick="sendCommand()">Wyślij komendę</button>
 
-  <label>Komenda do wykonania:
-    <input type="text" id="commandInput" placeholder="np. dir, ipconfig, etc." />
-  </label>
-  <button id="sendCommandBtn">Wyślij komendę</button>
+    <h2>Otrzymany wynik</h2>
+    <pre id="resultOutput">Brak wyniku</pre>
 
-  <h3>Wynik komendy:</h3>
-  <textarea id="resultOutput" readonly></textarea>
-</div>
+    <button onclick="getResult()">Odśwież wynik</button>
+  </div>
 
-<script>
-  const API_TOKEN = 'tu_wstaw_api_token_z_env';
-  let panelPassword = null;
-  let loggedIn = false;
+  <script>
+    let loggedIn = false;
+    let selectedClient = null;
 
-  const loginPanel = document.getElementById('loginPanel');
-  const controlPanel = document.getElementById('controlPanel');
-  const passwordInput = document.getElementById('passwordInput');
-  const loginBtn = document.getElementById('loginBtn');
-  const loginError = document.getElementById('loginError');
-
-  const clientSelect = document.getElementById('clientSelect');
-  const commandInput = document.getElementById('commandInput');
-  const sendCommandBtn = document.getElementById('sendCommandBtn');
-  const resultOutput = document.getElementById('resultOutput');
-
-  async function fetchPanelPassword() {
-    try {
-      const res = await fetch('/password');
-      if (!res.ok) throw new Error('Nie udało się pobrać hasła');
-      const data = await res.json();
-      panelPassword = data.password;
-    } catch (e) {
-      alert('Błąd serwera: ' + e.message);
-    }
-  }
-
-  loginBtn.onclick = () => {
-    if (passwordInput.value === panelPassword) {
-      loggedIn = true;
-      loginPanel.style.display = 'none';
-      controlPanel.style.display = 'block';
-      loginError.textContent = '';
-      loadClients();
-      startResultPolling();
-    } else {
-      loginError.textContent = 'Nieprawidłowe hasło';
-    }
-  };
-
-  async function loadClients() {
-    try {
-      const res = await fetch('/clients', {
-        headers: { 'Authorization': `Bearer ${API_TOKEN}` }
+    async function login() {
+      const password = document.getElementById('password').value;
+      const res = await fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password })
       });
-      if (!res.ok) throw new Error('Błąd pobierania klientów');
-      const clients = await res.json();
-      clientSelect.innerHTML = '';
-      if (clients.length === 0) {
-        clientSelect.innerHTML = '<option disabled>Brak podłączonych klientów</option>';
+      if (res.ok) {
+        loggedIn = true;
+        document.getElementById('loginDiv').style.display = 'none';
+        document.getElementById('panelDiv').style.display = 'block';
+        loadClients();
       } else {
-        clients.forEach(c => {
-          const option = document.createElement('option');
-          option.value = c;
-          option.textContent = c;
-          clientSelect.appendChild(option);
-        });
+        alert('Błędne hasło!');
       }
-    } catch (e) {
-      alert('Błąd: ' + e.message);
-    }
-  }
-
-  sendCommandBtn.onclick = async () => {
-    const command = commandInput.value.trim();
-    const client = clientSelect.value;
-    if (!command) {
-      alert('Wpisz komendę');
-      return;
-    }
-    if (!client) {
-      alert('Wybierz klienta');
-      return;
     }
 
-    try {
+    async function loadClients() {
+      if (!loggedIn) return alert('Zaloguj się najpierw!');
+      const res = await fetch('/clients');
+      const clients = await res.json();
+      const select = document.getElementById('clientsSelect');
+      select.innerHTML = '';
+      clients.forEach(c => {
+        const option = document.createElement('option');
+        option.value = c;
+        option.textContent = c;
+        select.appendChild(option);
+      });
+      if (clients.length > 0) {
+        selectedClient = clients[0];
+      }
+    }
+
+    function selectClient() {
+      const select = document.getElementById('clientsSelect');
+      selectedClient = select.value;
+      document.getElementById('resultOutput').textContent = 'Brak wyniku';
+    }
+
+    async function sendCommand() {
+      if (!selectedClient) return alert('Wybierz klienta!');
+      const command = document.getElementById('commandInput').value;
+      if (!command) return alert('Wpisz komendę!');
       const res = await fetch('/command', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${API_TOKEN}`
-        },
-        body: JSON.stringify({ command, client })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client: selectedClient, command })
       });
-      if (!res.ok) throw new Error('Błąd wysyłania komendy');
-      commandInput.value = '';
-      resultOutput.value = 'Komenda wysłana, czekam na wynik...';
-    } catch (e) {
-      alert('Błąd: ' + e.message);
-    }
-  };
-
-  // Polling wyniku komendy co 3 sekundy
-  async function startResultPolling() {
-    setInterval(async () => {
-      if (!loggedIn) return;
-      const client = clientSelect.value;
-      if (!client) return;
-
-      try {
-        const res = await fetch(`/result?client=${encodeURIComponent(client)}`, {
-          headers: { 'Authorization': `Bearer ${API_TOKEN}` }
-        });
-        if (res.status === 200) {
-          const result = await res.text();
-          resultOutput.value = result;
-          loadClients(); // odśwież listę klientów (np. nowi mogą się pojawić)
-        }
-      } catch (e) {
-        console.error('Błąd pobierania wyniku:', e);
+      if (res.ok) {
+        alert('Komenda wysłana!');
+        document.getElementById('commandInput').value = '';
+      } else {
+        alert('Błąd wysyłania komendy');
       }
-    }, 3000);
-  }
+    }
 
-  // Inicjalizacja
-  (async () => {
-    await fetchPanelPassword();
-  })();
-</script>
-
+    async function getResult() {
+      if (!selectedClient) return alert('Wybierz klienta!');
+      const res = await fetch(`/result?client=${encodeURIComponent(selectedClient)}`);
+      if (res.status === 200) {
+        const text = await res.text();
+        document.getElementById('resultOutput').textContent = text;
+      } else {
+        document.getElementById('resultOutput').textContent = 'Brak wyniku';
+      }
+    }
+  </script>
 </body>
 </html>
