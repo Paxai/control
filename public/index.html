@@ -57,6 +57,8 @@
     <h2>Klienci</h2>
     <select id="clientsSelect" onchange="selectClient()"></select>
 
+    <button onclick="openExplorer()">Otwórz eksplorator plików</button>
+
     <h2>Wysyłanie komendy</h2>
     <input id="commandInput" type="text" placeholder="Komenda do wysłania" />
     <button onclick="sendCommand()">Wyślij komendę</button>
@@ -78,7 +80,7 @@
   <script>
     let loggedIn = false;
     let selectedClient = null;
-    let apiToken = null; // musimy przechować token do auth w fetchach eksploratora
+    let apiToken = null;
 
     async function login() {
       const password = document.getElementById('password').value;
@@ -89,15 +91,10 @@
       });
       if (res.ok) {
         loggedIn = true;
-        // Po zalogowaniu załaduj token z backendu (zakładam, że token jest znany w front-endzie, 
-        // np. wpisujesz go ręcznie, albo można zrobić endpoint, który zwraca token po zalogowaniu)
-        // Jeśli chcesz, możesz ręcznie przypisać token tutaj:
         apiToken = prompt("Wpisz swój API_TOKEN (token autoryzacyjny):");
         document.getElementById('loginDiv').style.display = 'none';
         document.getElementById('panelDiv').style.display = 'block';
-        document.getElementById('fileExplorer').style.display = 'block';
         loadClients();
-        loadFiles('C:\\'); // start z katalogu C:\ (dla Windowsa)
       } else {
         alert('Błędne hasło!');
       }
@@ -154,19 +151,24 @@
       }
     }
 
-    // --- Eksplorator plików ---
-
+    // Eksplorator plików - pokazuje i ładuje pliki tylko po kliknięciu
     const fileListElem = document.getElementById('fileList');
     const fileContentElem = document.getElementById('fileContent');
     const currentPathElem = document.getElementById('currentPath');
-
     let currentPath = '';
 
+    function pathEndsWithSlash(p) {
+      return p.endsWith('\\') || p.endsWith('/');
+    }
+
+    async function openExplorer() {
+      if (!selectedClient) return alert("Wybierz klienta, zanim otworzysz eksplorator!");
+      if (!apiToken) return alert("Brak tokena API!");
+      document.getElementById('fileExplorer').style.display = 'block';
+      await loadFiles('C:\\'); // startujemy z C:\ dla Windows
+    }
+
     async function loadFiles(path) {
-      if (!apiToken) {
-        alert("Brak tokena API. Nie można pobrać plików.");
-        return;
-      }
       try {
         const res = await fetch(`/api/files?path=${encodeURIComponent(path)}`, {
           headers: { 'Authorization': `Bearer ${apiToken}` }
@@ -180,7 +182,7 @@
         currentPathElem.textContent = `Ścieżka: ${currentPath}`;
         fileListElem.innerHTML = '';
 
-        // Jeśli nie root, dodaj możliwość powrotu do katalogu wyżej
+        // Przycisk powrotu do katalogu wyżej
         if (path !== '' && path !== '/' && !path.match(/^[a-zA-Z]:\\?$/)) {
           const upLi = document.createElement('li');
           upLi.textContent = '.. (folder nadrzędny)';
@@ -209,10 +211,6 @@
       } catch (e) {
         alert('Błąd: ' + e.message);
       }
-    }
-
-    function pathEndsWithSlash(p) {
-      return p.endsWith('\\') || p.endsWith('/');
     }
 
     async function loadFileContent(filePath) {
